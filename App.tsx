@@ -1,12 +1,13 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { PlayerState, CardType, GameCard, SpaceType, Asset, GameDifficulty, BoardSpace, GameLogEntry, Profession, Liability } from './types';
-import { INITIAL_PLAYER_TEMPLATE, BOARD_SPACES, LIVING_EXPENSES_BASE, CHILD_EXPENSE, DIFFICULTY_SETTINGS, PLAYER_COLORS_HEX } from './constants';
+import { INITIAL_PLAYER_TEMPLATE, BOARD_SPACES, FAST_TRACK_SPACES, LIVING_EXPENSES_BASE, CHILD_EXPENSE, DIFFICULTY_SETTINGS, PLAYER_COLORS_HEX } from './constants';
 import FinancialStatement from './components/FinancialStatement';
 import GameBoard from './components/GameBoard';
 import EventModal from './components/EventModal';
 import GameSetup from './components/GameSetup';
 import { generateCardWithGemini } from './services/geminiService';
-import { Dices, Trophy, RotateCcw, DollarSign, Bot, Activity } from 'lucide-react';
+import { Dices, Trophy, RotateCcw, DollarSign, Bot, Activity, Star } from 'lucide-react';
 
 export default function App() {
   const [phase, setPhase] = useState<'SETUP' | 'GAME'>('SETUP');
@@ -26,10 +27,13 @@ export default function App() {
   const [aiDecision, setAiDecision] = useState<'BUY' | 'PASS' | null>(null);
   
   const aiTurnInProgress = useRef(false);
+  // Lock to prevent double-skipping turns (e.g. clicking "Next" while AI timer also fires)
+  const turnTransitionRef = useRef(false);
 
   const currentPlayer = players[currentPlayerIndex] || { ...INITIAL_PLAYER_TEMPLATE, name: '', id: '', profession: '', cash: 0, salary: 0 };
   const viewingPlayer = players[viewingPlayerIndex] || currentPlayer;
 
+  // Sync view to current player unless manually changed, but handle track switching logic in rendering
   useEffect(() => {
     if (phase === 'GAME') {
         setViewingPlayerIndex(currentPlayerIndex);
@@ -54,13 +58,21 @@ export default function App() {
 
     setPlayers(prevPlayers => prevPlayers.map(p => {
       const passiveIncome = p.assets.reduce((sum, a) => sum + a.cashflow, 0);
-      const liabExpense = p.liabilities.reduce((sum, l) => sum + l.expense, 0);
-      const childCost = p.children * CHILD_EXPENSE;
       
-      // Basic taxes/expenses approximation based on salary if no explicit formula
-      const taxesAndOther = p.salary * 0.2; 
-      const totalExpenses = Math.floor(taxesAndOther + liabExpense + childCost);
-      const payday = (p.salary + passiveIncome) - totalExpenses;
+      let totalExpenses = 0;
+      let payday = 0;
+
+      if (p.isRatRace) {
+          const liabExpense = p.liabilities.reduce((sum, l) => sum + l.expense, 0);
+          const childCost = p.children * CHILD_EXPENSE;
+          const taxesAndOther = p.salary * 0.2; 
+          totalExpenses = Math.floor(taxesAndOther + liabExpense + childCost);
+          payday = (p.salary + passiveIncome) - totalExpenses;
+      } else {
+          // Fast Track: No expenses really matter, just accumulation
+          totalExpenses = 0;
+          payday = p.passiveIncome; // On fast track, passive income IS the payday
+      }
 
       return {
         ...p,
@@ -69,12 +81,12 @@ export default function App() {
         payday
       };
     }));
-  }, [JSON.stringify(players.map(p => ({ a: p.assets, l: p.liabilities, c: p.children, s: p.salary })))]);
+  }, [JSON.stringify(players.map(p => ({ a: p.assets, l: p.liabilities, c: p.children, s: p.salary, rr: p.isRatRace })))]);
 
   // --- Logic: AI Turn & Watchdog ---
   useEffect(() => {
     // 1. Trigger AI turn start
-    if (phase === 'GAME' && !currentPlayer.isHuman && !aiTurnInProgress.current && !turnCompleted) {
+    if (phase === 'GAME' && !currentPlayer.isHuman && !aiTurnInProgress.current && !turnCompleted && !players.find(p => p.hasWon)) {
         startAiTurn();
     }
   }, [currentPlayerIndex, phase, turnCompleted, currentPlayer.isHuman]);
@@ -83,18 +95,19 @@ export default function App() {
   useEffect(() => {
     let watchdog: ReturnType<typeof setTimeout>;
     
-    // STRICT CHECK: Only run watchdog if current player is NOT human
-    if (isModalOpen && !currentPlayer.isHuman) {
+    // STRICT CHECK: Only run watchdog if current player is strictly NOT human
+    // And ensure we don't double-trigger if turn is already transitioning
+    if (isModalOpen && !players[currentPlayerIndex].isHuman && !turnTransitionRef.current) {
         watchdog = setTimeout(() => {
             console.warn("AI Turn watchdog triggered - forcing next turn");
             addLog("Бот задумался, идем дальше.", "NEUTRAL");
             closeModal();
-        }, 10000); // 10 seconds max for AI to interact with modal
+        }, 12000); // 12 seconds max for AI to interact with modal
     }
     return () => {
         if (watchdog) clearTimeout(watchdog);
     };
-  }, [isModalOpen, currentPlayerIndex, currentPlayer.isHuman]);
+  }, [isModalOpen, currentPlayerIndex, players]);
 
   const startAiTurn = async () => {
     if (aiTurnInProgress.current) return;
@@ -120,7 +133,6 @@ export default function App() {
     const newPlayers: PlayerState[] = config.names.map((name, index) => {
       const prof = config.professions[index];
       
-      // Convert profession liabilities to player liabilities
       const liabilities: Liability[] = [
         { id: 'mortgage', name: 'Ипотека', value: prof.liabilities.homeMortgage, expense: Math.floor(prof.liabilities.homeMortgage * 0.007) },
         { id: 'school', name: 'Учеба', value: prof.liabilities.schoolLoans, expense: Math.floor(prof.liabilities.schoolLoans * 0.005) },
@@ -138,7 +150,9 @@ export default function App() {
         salary: prof.salary + settings.salaryBonus,
         cash: prof.savings + settings.startCashBonus,
         assets: [],
-        liabilities: liabilities
+        liabilities: liabilities,
+        isRatRace: true, // Start in Rat Race
+        hasWon: false
       };
     });
 
@@ -152,10 +166,51 @@ export default function App() {
     addLog("Игра началась! Удачи в крысиных бегах.", "INFO");
   };
 
+  const handleGraduation = (playerIdx: number) => {
+      const updatedPlayers = [...players];
+      const p = updatedPlayers[playerIdx];
+      
+      // Graduation Logic
+      p.isRatRace = false;
+      p.currentPosition = 0; // Start of Fast Track
+      p.cash += 100000; // Graduation Bonus
+      
+      // Convert initial passive income to "Fast Track Base Income" (multiplying it)
+      const baseFastTrackIncome = p.passiveIncome * 100;
+      
+      // Clear old rat race assets/liabilities to simplify UI on fast track
+      p.assets = [{
+          id: 'fast_track_seed',
+          name: 'Начальный Капитал',
+          cost: 0,
+          downPayment: 0,
+          cashflow: baseFastTrackIncome,
+          type: 'BUSINESS'
+      }];
+      p.liabilities = [];
+      p.children = 0; // Simplified for Fast Track
+      
+      setPlayers(updatedPlayers);
+      setModalMessage(`ПОЗДРАВЛЯЕМ! ${p.name} вышел из крысиных бегов! Доход умножен на 100x.`);
+      addLog(`${p.name} переходит на Скоростную Дорожку!`, "SUCCESS");
+      setIsModalOpen(true);
+  };
+
   const handleRollDice = async (isAi = false) => {
     if ((!isAi && !currentPlayer.isHuman) || (turnCompleted && !isAi)) return;
 
-    const roll = Math.floor(Math.random() * 6) + 1;
+    // Check graduation BEFORE roll
+    if (currentPlayer.isRatRace && currentPlayer.passiveIncome > currentPlayer.totalExpenses && currentPlayer.totalExpenses > 0) {
+        handleGraduation(currentPlayerIndex);
+        setTurnCompleted(true);
+        if (isAi) setTimeout(closeModal, 4000);
+        return;
+    }
+
+    const numDice = (!currentPlayer.isRatRace || currentPlayer.hasCharity) ? 2 : 1;
+    let roll = 0;
+    for(let i=0; i<numDice; i++) roll += Math.floor(Math.random() * 6) + 1;
+
     setDiceResult(roll);
     setTurnCompleted(true);
     addLog(`${currentPlayer.name} выбрасывает ${roll}`, "NEUTRAL");
@@ -163,7 +218,8 @@ export default function App() {
     if (isAi) await new Promise(r => setTimeout(r, 1000));
 
     const oldPos = currentPlayer.currentPosition;
-    const newPos = (oldPos + roll) % BOARD_SPACES.length;
+    const spaces = currentPlayer.isRatRace ? BOARD_SPACES : FAST_TRACK_SPACES;
+    const newPos = (oldPos + roll) % spaces.length;
 
     const updatedPlayers = [...players];
     updatedPlayers[currentPlayerIndex] = {
@@ -173,67 +229,93 @@ export default function App() {
     setPlayers(updatedPlayers);
 
     setTimeout(() => {
-        processSpace(BOARD_SPACES[newPos], updatedPlayers[currentPlayerIndex]);
+        // Use the FRESH state from players array, not the closure 'updatedPlayers' if possible, 
+        // though updatedPlayers is safe here because it's a synchronous chain within the roll
+        processSpace(spaces[newPos], updatedPlayers[currentPlayerIndex]);
     }, 600);
   };
 
   const processSpace = async (space: BoardSpace, player: PlayerState) => {
     const isAi = !player.isHuman;
+    
+    // Safety check: if the game phase changed or player invalid
+    if (!player) return;
 
     try {
-        if (space.type === SpaceType.PAYCHECK) {
+        // --- COMMON SPACES ---
+        if (space.type === SpaceType.PAYCHECK || space.type === SpaceType.CASHFLOW_DAY) {
           handlePayday(player);
-          if (isAi) setTimeout(closeModal, 2000);
+          if (isAi) setTimeout(closeModal, 2500);
           return;
         }
 
         if (space.type === SpaceType.CHARITY) {
-            setModalMessage(`${player.name} жертвует на благотворительность.`);
-            addLog(`${player.name} попадает на благотворительность`, "INFO");
+            setModalMessage(`${player.name} жертвует на благотворительность (2 кубика).`);
+            addLog(`${player.name} делает доброе дело`, "INFO");
+            const updated = [...players];
+            updated[currentPlayerIndex].hasCharity = true;
+            setPlayers(updated);
             setIsModalOpen(true);
-            if (isAi) setTimeout(closeModal, 2000);
-            return;
-        }
-        
-        if (space.type === SpaceType.DOWNSIZED) {
-            setModalMessage(`${player.name} попал под сокращение! Потеря: $${player.totalExpenses}.`);
-            addLog(`${player.name} теряет работу и платит $${player.totalExpenses}`, "DANGER");
-            const updatedPlayers = [...players];
-            updatedPlayers[currentPlayerIndex].cash -= player.totalExpenses;
-            setPlayers(updatedPlayers);
-            setIsModalOpen(true);
-            if (isAi) setTimeout(closeModal, 2000);
+            if (isAi) setTimeout(closeModal, 2500);
             return;
         }
 
-        if (space.type === SpaceType.BABY) {
-            setModalMessage(`${player.name}: Рождение ребенка! Расходы выросли.`);
-            addLog(`${player.name}: в семье пополнение!`, "NEUTRAL");
-            const updatedPlayers = [...players];
-            updatedPlayers[currentPlayerIndex].children += 1;
-            setPlayers(updatedPlayers);
-            setIsModalOpen(true);
-            if (isAi) setTimeout(closeModal, 2000);
-            return;
+        // --- RAT RACE SPECIFIC ---
+        if (player.isRatRace) {
+             if (space.type === SpaceType.DOWNSIZED) {
+                setModalMessage(`${player.name} попал под сокращение! Потеря: $${player.totalExpenses}.`);
+                addLog(`${player.name} теряет работу и платит $${player.totalExpenses}`, "DANGER");
+                const updatedPlayers = [...players];
+                updatedPlayers[currentPlayerIndex].cash -= player.totalExpenses;
+                updatedPlayers[currentPlayerIndex].hasCharity = false;
+                setPlayers(updatedPlayers);
+                setIsModalOpen(true);
+                if (isAi) setTimeout(closeModal, 2500);
+                return;
+            }
+
+            if (space.type === SpaceType.BABY) {
+                setModalMessage(`${player.name}: Рождение ребенка! Расходы выросли.`);
+                addLog(`${player.name}: в семье пополнение!`, "NEUTRAL");
+                const updatedPlayers = [...players];
+                updatedPlayers[currentPlayerIndex].children += 1;
+                setPlayers(updatedPlayers);
+                setIsModalOpen(true);
+                if (isAi) setTimeout(closeModal, 2500);
+                return;
+            }
+
+            if (space.type === SpaceType.OPPORTUNITY) {
+                const type = player.cash >= 6000 ? CardType.BIG_DEAL : CardType.SMALL_DEAL;
+                await fetchAndShowCard(type, isAi);
+                return;
+            }
+
+            if (space.type === SpaceType.MARKET) {
+                await fetchAndShowCard(CardType.MARKET_EVENT, isAi);
+                return;
+            }
+
+            if (space.type === SpaceType.DOODAD) {
+                await fetchAndShowCard(CardType.DOODAD_EVENT, isAi);
+                return;
+            }
+        } 
+        // --- FAST TRACK SPECIFIC ---
+        else {
+             if (space.type === SpaceType.BUSINESS) {
+                 await fetchAndShowCard(CardType.FAST_BUSINESS, isAi);
+                 return;
+             }
+             if (space.type === SpaceType.DREAM) {
+                 await fetchAndShowCard(CardType.DREAM_GOAL, isAi);
+                 return;
+             }
         }
 
-        if (space.type === SpaceType.OPPORTUNITY) {
-            const type = player.cash >= 6000 ? CardType.BIG_DEAL : CardType.SMALL_DEAL;
-            await fetchAndShowCard(type, isAi);
-            return;
-        }
-
-        if (space.type === SpaceType.MARKET) {
-            await fetchAndShowCard(CardType.MARKET_EVENT, isAi);
-            return;
-        }
-
-        if (space.type === SpaceType.DOODAD) {
-            await fetchAndShowCard(CardType.DOODAD_EVENT, isAi);
-            return;
-        }
     } catch (e) {
         console.error("Error processing space", e);
+        // Ensure we don't get stuck if an error occurs
         if (isAi) closeModal();
     }
   };
@@ -242,8 +324,9 @@ export default function App() {
     const updatedPlayers = [...players];
     updatedPlayers[currentPlayerIndex].cash += player.payday;
     setPlayers(updatedPlayers);
-    setModalMessage(`ЗАРПЛАТА! ${player.name} получает $${player.payday}`);
-    addLog(`${player.name} получает зарплату $${player.payday}`, "SUCCESS");
+    const title = player.isRatRace ? "ЗАРПЛАТА" : "ДЕНЬГИ";
+    setModalMessage(`${title}! ${player.name} получает $${player.payday.toLocaleString()}`);
+    addLog(`${player.name} получает доход $${player.payday.toLocaleString()}`, "SUCCESS");
     setIsModalOpen(true);
   };
 
@@ -254,15 +337,12 @@ export default function App() {
     setAiDecision(null);
     
     try {
-      // 1-2 second delay for realism when playing offline or fetching
       const minDelay = new Promise(resolve => setTimeout(resolve, 800));
       const [card] = await Promise.all([generateCardWithGemini(type), minDelay]);
       
       setActiveCard(card);
       
       if (isAi) {
-         // Start visual thinking process. 
-         // IMPORTANT: Pass 'card' to makeAiDecision to avoid closure staleness of 'activeCard' state
          setTimeout(() => makeAiDecision(card), 2000);
       }
 
@@ -276,7 +356,6 @@ export default function App() {
   };
 
   const makeAiDecision = async (card: GameCard) => {
-      // Robust AI wrapper to prevent game freezing
       try {
         const p = players[currentPlayerIndex];
         let action: 'BUY' | 'PASS' = 'PASS';
@@ -284,10 +363,14 @@ export default function App() {
         // Logic
         if (card.type === CardType.DOODAD_EVENT) {
             action = 'BUY'; // Forced
+        } else if (card.type === CardType.DREAM_GOAL) {
+             // AI always tries to buy dream to win
+             if (p.cash >= (card.cost || 0)) action = 'BUY';
+        } else if (card.type === CardType.FAST_BUSINESS) {
+             if (p.cash >= (card.cost || 0)) action = 'BUY';
         } else if (card.type === CardType.SMALL_DEAL || card.type === CardType.BIG_DEAL) {
             const cost = card.downPayment || card.cost || 0;
             const cashflow = card.cashflow || 0;
-            // Basic heuristic: Buy if can afford and positive cashflow
             if (p.cash >= cost && cashflow >= 0) {
                 action = 'BUY';
             }
@@ -298,49 +381,57 @@ export default function App() {
             }
         }
 
-        // 1. Show decision Visually
         setAiDecision(action);
-        
-        // 2. Wait for user to see the "stamp"
         await new Promise(r => setTimeout(r, 1500));
 
-        // 3. Execute logic
         if (action === 'BUY') {
-            // Check affordability again safely just in case
-            if (card.type === CardType.DOODAD_EVENT || (card.downPayment || card.cost || 0) <= p.cash || card.type === CardType.MARKET_EVENT) {
-                 // Pass card explicitly to handleBuy
-                 handleBuy(true, card);
-            } else {
-                 // Fallback if logic said BUY but actually can't afford (edge case)
-                 addLog(`${p.name} хотел купить, но не хватило средств.`, "NEUTRAL");
-                 closeModal();
-            }
+             handleBuy(true, card);
         } else {
             addLog(`${p.name} пропускает "${card.title}"`, "NEUTRAL");
             closeModal();
         }
       } catch (e) {
           console.error("AI Decision Critical Error", e);
-          // Failsafe
           closeModal();
       }
   };
 
 
   const handleBuy = (skipAiLog = false, cardOverride?: GameCard) => {
-    // Priority: use the overridden card (for AI), otherwise current activeCard
     const targetCard = cardOverride || activeCard;
-
     if (!targetCard) {
-        console.warn("Attempted to buy with no active card");
-        if (skipAiLog) closeModal(); // Failsafe for AI
+        if (skipAiLog) closeModal();
         return;
     }
 
     const updatedPlayers = [...players];
     const currentP = updatedPlayers[currentPlayerIndex];
 
-    if (targetCard.type === CardType.DOODAD_EVENT) {
+    if (targetCard.type === CardType.DREAM_GOAL) {
+        if (currentP.cash >= (targetCard.cost || 0)) {
+            currentP.cash -= (targetCard.cost || 0);
+            currentP.hasWon = true;
+            addLog(`${currentP.name} ПОКУПАЕТ МЕЧТУ "${targetCard.title}"!`, "SUCCESS");
+        } else {
+            addLog(`${currentP.name} не хватило денег на мечту.`, "NEUTRAL");
+        }
+    } 
+    else if (targetCard.type === CardType.FAST_BUSINESS) {
+        const cost = targetCard.cost || 0;
+        const newAsset: Asset = {
+            id: targetCard.id,
+            name: targetCard.title,
+            cost: cost,
+            downPayment: cost,
+            cashflow: targetCard.cashflow || 0,
+            type: 'FAST_TRACK_BIZ',
+            quantity: 1
+        };
+        currentP.cash -= cost;
+        currentP.assets.push(newAsset);
+        addLog(`${currentP.name} купил бизнес ${targetCard.title}`, "SUCCESS");
+    }
+    else if (targetCard.type === CardType.DOODAD_EVENT) {
         currentP.cash -= (targetCard.cost || 0);
         addLog(`${currentP.name} потратил $${targetCard.cost} на ${targetCard.title}`, "DANGER");
     } else if (targetCard.type === CardType.SMALL_DEAL || targetCard.type === CardType.BIG_DEAL) {
@@ -382,6 +473,11 @@ export default function App() {
   };
 
   const nextTurn = () => {
+    // CRITICAL: Prevent double-skipping if a turn transition is already happening
+    // This happens if user clicks "Close" on a bot modal just as the bot timer fires
+    if (turnTransitionRef.current) return;
+    turnTransitionRef.current = true;
+
     setIsModalOpen(false);
     setActiveCard(null);
     setModalMessage(undefined);
@@ -389,24 +485,28 @@ export default function App() {
     setTurnCompleted(false);
     setAiDecision(null);
     aiTurnInProgress.current = false;
+    
+    // Increment player
     setCurrentPlayerIndex((prev) => (prev + 1) % players.length);
+
+    // Release lock after small delay to allow state to settle
+    setTimeout(() => {
+        turnTransitionRef.current = false;
+    }, 500);
   };
 
   const closeModal = () => {
     nextTurn();
   };
 
-  const checkWin = () => {
-      const winner = players.find(p => p.passiveIncome > p.totalExpenses);
-      return winner;
-  };
-  const winner = checkWin();
+  const winner = players.find(p => p.hasWon);
 
   const handleRestart = () => {
       setPhase('SETUP');
       setPlayers([]);
       setGameLog([]);
       aiTurnInProgress.current = false;
+      turnTransitionRef.current = false;
   }
 
   if (phase === 'SETUP') {
@@ -417,14 +517,14 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900">
       
       {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md text-slate-900 shadow-sm sticky top-0 z-40 border-b border-slate-200">
+      <header className={`backdrop-blur-md text-slate-900 shadow-sm sticky top-0 z-40 border-b transition-colors duration-500 ${currentPlayer.isRatRace ? 'bg-white/80 border-slate-200' : 'bg-slate-900/90 border-yellow-600 text-white'}`}>
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between p-2 md:px-4">
             <div className="flex items-center justify-between w-full md:w-auto mb-2 md:mb-0">
                 <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-500/20">
                         <DollarSign className="w-5 h-5 text-white" />
                     </div>
-                    <h1 className="text-lg font-black tracking-tight hidden sm:block">FinFreedom</h1>
+                    <h1 className={`text-lg font-black tracking-tight hidden sm:block ${!currentPlayer.isRatRace && 'text-yellow-400'}`}>FinFreedom</h1>
                 </div>
                 
                  <button onClick={handleRestart} className="md:hidden p-2 hover:bg-slate-100 rounded-full">
@@ -444,22 +544,22 @@ export default function App() {
                             ${idx === currentPlayerIndex ? 'ring-2 ring-offset-1 ring-slate-800 border-slate-800 bg-white' : ''}
                             ${idx === viewingPlayerIndex && idx !== currentPlayerIndex ? 'bg-slate-100 border-slate-300' : 'bg-white/50 border-transparent'}
                             ${idx !== currentPlayerIndex && idx !== viewingPlayerIndex ? 'opacity-60 hover:opacity-100' : ''}
+                            ${!p.isRatRace && 'ring-2 ring-yellow-400 bg-yellow-50'}
                         `}
                     >
                         <div 
                             className={`
-                                w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm
+                                w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm relative
                             `}
                             style={{ backgroundColor: PLAYER_COLORS_HEX[idx] }}
                         >
                             {p.name.charAt(0)}
+                            {!p.isRatRace && <div className="absolute -top-1 -right-1 bg-yellow-400 rounded-full p-0.5"><Star className="w-2 h-2 text-yellow-900 fill-current"/></div>}
                         </div>
                         <div className="flex flex-col items-start leading-none min-w-[60px]">
-                            <span className="text-[10px] font-bold truncate max-w-[70px]">{p.name}</span>
+                            <span className="text-[10px] font-bold truncate max-w-[70px] text-slate-800">{p.name}</span>
                             <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500">
                                 <span className="text-emerald-600 font-bold">${p.cash < 1000 ? p.cash : (p.cash/1000).toFixed(1) + 'k'}</span>
-                                <span className="text-slate-300">|</span>
-                                <span className="text-yellow-600">+${p.payday}</span>
                             </div>
                         </div>
                     </button>
@@ -481,15 +581,18 @@ export default function App() {
         {/* Left: Game Board & Central Controls */}
         <div className="lg:col-span-8 flex flex-col gap-6 order-2 lg:order-1 h-full">
              <GameBoard 
-                spaces={BOARD_SPACES} 
+                spaces={viewingPlayer.isRatRace ? BOARD_SPACES : FAST_TRACK_SPACES} 
                 players={players} 
                 currentPlayerIndex={currentPlayerIndex}
+                viewingPlayerIndex={viewingPlayerIndex}
              >
                  {/* Center Controls */}
-                 <div className="flex flex-col items-center justify-center h-full gap-4 md:gap-6 w-full max-w-xs mx-auto text-center">
+                 <div className={`flex flex-col items-center justify-center h-full gap-4 md:gap-6 w-full max-w-xs mx-auto text-center ${!viewingPlayer.isRatRace ? 'text-white' : ''}`}>
                     
                     <div>
-                        <div className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">Ход игрока</div>
+                        <div className={`text-xs font-bold uppercase tracking-widest mb-1 ${!viewingPlayer.isRatRace ? 'text-yellow-400' : 'text-slate-400'}`}>
+                            {currentPlayer.isRatRace !== viewingPlayer.isRatRace ? `Ход: ${currentPlayer.name}` : 'Ваш ход'}
+                        </div>
                         <h2 
                             className="text-3xl font-black truncate max-w-[200px]" 
                             style={{ color: PLAYER_COLORS_HEX[currentPlayerIndex] }}
@@ -500,6 +603,9 @@ export default function App() {
                             <div className="inline-flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-full text-[10px] font-bold text-slate-500 mt-2 animate-pulse">
                                 <Bot className="w-3 h-3" /> АВТОПИЛОТ
                             </div>
+                        )}
+                        {!currentPlayer.isRatRace && (
+                            <div className="text-yellow-400 text-xs font-black uppercase mt-1 tracking-widest drop-shadow-md">СКОРОСТНАЯ ДОРОЖКА</div>
                         )}
                     </div>
 
@@ -518,7 +624,9 @@ export default function App() {
                                 flex-1 h-24 rounded-2xl font-bold text-lg transition-all flex flex-col items-center justify-center gap-1
                                 ${turnCompleted || !currentPlayer.isHuman 
                                     ? 'bg-slate-100 text-slate-400 shadow-none cursor-default border border-slate-200' 
-                                    : 'bg-gradient-to-br from-slate-900 to-slate-800 text-white hover:to-slate-700 hover:-translate-y-1 shadow-xl shadow-slate-300'}
+                                    : !currentPlayer.isRatRace 
+                                        ? 'bg-gradient-to-br from-yellow-500 to-yellow-600 text-white hover:scale-105 shadow-xl shadow-yellow-500/30'
+                                        : 'bg-gradient-to-br from-slate-900 to-slate-800 text-white hover:to-slate-700 hover:-translate-y-1 shadow-xl shadow-slate-300'}
                             `}
                         >
                             <Dices className="w-6 h-6" />
@@ -575,7 +683,8 @@ export default function App() {
             ? (activeCard.symbol === 'REAL_ESTATE_3BR' ? currentPlayer.assets.some(a => a.name.includes('Квартира')) : false) 
             : (activeCard?.downPayment || activeCard?.cost || 0) <= currentPlayer.cash
         }
-        isAiTurn={!currentPlayer.isHuman && !modalMessage}
+        // Fix: Use strictly the isHuman flag to prevent showing close buttons on bot turns, even if a message is displayed.
+        isAiTurn={!currentPlayer.isHuman}
         aiDecision={aiDecision}
       />
       
@@ -587,17 +696,17 @@ export default function App() {
             </div>
             <h2 className="text-6xl font-black text-white mb-2 tracking-tighter">ПОБЕДА!</h2>
             <p className="text-2xl text-slate-300 font-light mb-10">
-                <strong className="text-emerald-400 font-black text-3xl">{winner.name}</strong> обрел свободу!
+                <strong className="text-emerald-400 font-black text-3xl">{winner.name}</strong> купил свою мечту!
             </p>
             
             <div className="grid grid-cols-2 gap-4 max-w-md w-full mb-10">
                 <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700">
                     <div className="text-slate-400 text-xs uppercase font-bold mb-1">Пассивный доход</div>
-                    <div className="text-emerald-400 font-mono text-2xl font-bold">${winner.passiveIncome}</div>
+                    <div className="text-emerald-400 font-mono text-2xl font-bold">${winner.passiveIncome.toLocaleString()}</div>
                 </div>
                 <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700">
-                    <div className="text-slate-400 text-xs uppercase font-bold mb-1">Расходы</div>
-                    <div className="text-rose-400 font-mono text-2xl font-bold">${winner.totalExpenses}</div>
+                    <div className="text-slate-400 text-xs uppercase font-bold mb-1">Наличные</div>
+                    <div className="text-yellow-400 font-mono text-2xl font-bold">${winner.cash.toLocaleString()}</div>
                 </div>
             </div>
 

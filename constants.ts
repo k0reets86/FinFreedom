@@ -72,6 +72,7 @@ export const INITIAL_PLAYER_TEMPLATE: Omit<PlayerState, 'name' | 'id' | 'isHuman
   currentPosition: 0,
   skippedTurns: 0,
   hasCharity: false,
+  hasWon: false
 };
 
 // Expanded board with 20 spaces
@@ -104,6 +105,36 @@ export const BOARD_SPACES: BoardSpace[] = [
   { id: 18, type: SpaceType.OPPORTUNITY, label: "Сделка", color: "bg-emerald-500" },
   { id: 19, type: SpaceType.MARKET, label: "Рынок", color: "bg-sky-500" },
 ];
+
+export const FAST_TRACK_SPACES: BoardSpace[] = [
+    // Top Row
+    { id: 0, type: SpaceType.CASHFLOW_DAY, label: "ДЕНЬГИ", color: "bg-yellow-500 ring-2 ring-yellow-300" },
+    { id: 1, type: SpaceType.BUSINESS, label: "Бизнес", color: "bg-emerald-600" },
+    { id: 2, type: SpaceType.DREAM, label: "МЕЧТА", color: "bg-pink-600 ring-2 ring-pink-300" },
+    { id: 3, type: SpaceType.CHARITY, label: "Благо", color: "bg-violet-600" },
+    { id: 4, type: SpaceType.BUSINESS, label: "Бизнес", color: "bg-emerald-600" },
+    { id: 5, type: SpaceType.DREAM, label: "МЕЧТА", color: "bg-pink-600 ring-2 ring-pink-300" },
+    
+    // Right Col
+    { id: 6, type: SpaceType.CASHFLOW_DAY, label: "ДЕНЬГИ", color: "bg-yellow-500 ring-2 ring-yellow-300" },
+    { id: 7, type: SpaceType.BUSINESS, label: "Бизнес", color: "bg-emerald-600" },
+    { id: 8, type: SpaceType.DREAM, label: "МЕЧТА", color: "bg-pink-600 ring-2 ring-pink-300" },
+    { id: 9, type: SpaceType.CHARITY, label: "Благо", color: "bg-violet-600" },
+  
+    // Bottom Row
+    { id: 10, type: SpaceType.CASHFLOW_DAY, label: "ДЕНЬГИ", color: "bg-yellow-500 ring-2 ring-yellow-300" },
+    { id: 11, type: SpaceType.BUSINESS, label: "Бизнес", color: "bg-emerald-600" },
+    { id: 12, type: SpaceType.DREAM, label: "МЕЧТА", color: "bg-pink-600 ring-2 ring-pink-300" },
+    { id: 13, type: SpaceType.CHARITY, label: "Благо", color: "bg-violet-600" },
+    { id: 14, type: SpaceType.BUSINESS, label: "Бизнес", color: "bg-emerald-600" },
+    { id: 15, type: SpaceType.DREAM, label: "МЕЧТА", color: "bg-pink-600 ring-2 ring-pink-300" },
+  
+    // Left Col
+    { id: 16, type: SpaceType.CASHFLOW_DAY, label: "ДЕНЬГИ", color: "bg-yellow-500 ring-2 ring-yellow-300" },
+    { id: 17, type: SpaceType.BUSINESS, label: "Бизнес", color: "bg-emerald-600" },
+    { id: 18, type: SpaceType.DREAM, label: "МЕЧТА", color: "bg-pink-600 ring-2 ring-pink-300" },
+    { id: 19, type: SpaceType.CHARITY, label: "Благо", color: "bg-violet-600" },
+  ];
 
 export const LIVING_EXPENSES_BASE = 0; // Calculated dynamically now based on debts + taxes (simplified as base expenses per profession usually, but we'll adapt)
 export const CHILD_EXPENSE = 240;

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { CardType, GameCard } from '../types';
 
@@ -264,6 +265,49 @@ const MARKET_DB: GameCard[] = [
   }
 ];
 
+// --- FAST TRACK DB ---
+const FAST_TRACK_BIZ_DB: GameCard[] = [
+  {
+    id: 'ft_1', title: 'Холдинг Недвижимости', description: 'Крупная международная сеть.',
+    type: CardType.FAST_BUSINESS, cost: 200000, cashflow: 15000
+  },
+  {
+    id: 'ft_2', title: 'Киностудия', description: 'Продюсирование блокбастеров.',
+    type: CardType.FAST_BUSINESS, cost: 400000, cashflow: 25000
+  },
+  {
+    id: 'ft_3', title: 'IT-Гигант', description: 'Выкуп контрольного пакета акций.',
+    type: CardType.FAST_BUSINESS, cost: 500000, cashflow: 40000
+  },
+  {
+    id: 'ft_4', title: 'Нефтяные Скважины', description: 'Инвестиция в добычу.',
+    type: CardType.FAST_BUSINESS, cost: 150000, cashflow: 10000
+  },
+  {
+    id: 'ft_5', title: 'Сеть Ресторанов', description: 'Франшиза по всей стране.',
+    type: CardType.FAST_BUSINESS, cost: 250000, cashflow: 18000
+  }
+];
+
+const FAST_TRACK_DREAM_DB: GameCard[] = [
+  {
+    id: 'dream_1', title: 'Частный Остров', description: 'Личный рай в Тихом океане.',
+    type: CardType.DREAM_GOAL, cost: 500000
+  },
+  {
+    id: 'dream_2', title: 'Футбольный Клуб', description: 'Владение клубом премьер-лиги.',
+    type: CardType.DREAM_GOAL, cost: 800000
+  },
+  {
+    id: 'dream_3', title: 'Космический Тур', description: 'Полет на орбиту для всей семьи.',
+    type: CardType.DREAM_GOAL, cost: 300000
+  },
+  {
+    id: 'dream_4', title: 'Парк Львов', description: 'Заповедник в Африке имени себя.',
+    type: CardType.DREAM_GOAL, cost: 400000
+  }
+];
+
 // --- SERVICE ---
 
 const getClient = () => {
@@ -274,6 +318,15 @@ const getClient = () => {
 
 // Random selector for offline mode
 const getRandomCard = (type: CardType): GameCard => {
+  if (type === CardType.FAST_BUSINESS) {
+      const db = FAST_TRACK_BIZ_DB;
+      return { ...db[Math.floor(Math.random() * db.length)], id: `ft_${Date.now()}` };
+  }
+  if (type === CardType.DREAM_GOAL) {
+      const db = FAST_TRACK_DREAM_DB;
+      return { ...db[Math.floor(Math.random() * db.length)], id: `dream_${Date.now()}` };
+  }
+
   const db = type === CardType.SMALL_DEAL ? SMALL_DEALS_DB :
              type === CardType.BIG_DEAL ? BIG_DEALS_DB :
              type === CardType.DOODAD_EVENT ? DOODADS_DB :
@@ -284,6 +337,11 @@ const getRandomCard = (type: CardType): GameCard => {
 };
 
 export const generateCardWithGemini = async (type: CardType): Promise<GameCard> => {
+  // Fast track is always offline logic for speed and simplicity
+  if (type === CardType.FAST_BUSINESS || type === CardType.DREAM_GOAL) {
+      return getRandomCard(type);
+  }
+
   const ai = getClient();
   
   // If no API key is present, IMMEDIATELY use offline DB without waiting or logging error

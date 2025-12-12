@@ -7,6 +7,10 @@ export enum SpaceType {
   PAYCHECK = 'PAYCHECK',       // Зарплата
   BABY = 'BABY',               // Ребенок
   DOWNSIZED = 'DOWNSIZED',     // Увольнение
+  // FAST TRACK SPACES
+  BUSINESS = 'BUSINESS',       // Крупный бизнес
+  DREAM = 'DREAM',             // Мечта (Победа)
+  CASHFLOW_DAY = 'CASHFLOW_DAY' // Деньги
 }
 
 export enum CardType {
@@ -14,6 +18,9 @@ export enum CardType {
   BIG_DEAL = 'BIG_DEAL',
   MARKET_EVENT = 'MARKET_EVENT',
   DOODAD_EVENT = 'DOODAD_EVENT',
+  // Fast Track
+  FAST_BUSINESS = 'FAST_BUSINESS',
+  DREAM_GOAL = 'DREAM_GOAL'
 }
 
 export enum GameDifficulty {
@@ -42,7 +49,7 @@ export interface Asset {
   cost: number;
   downPayment: number; // 0 for stocks
   cashflow: number; // Monthly income
-  type: 'REAL_ESTATE' | 'STOCK' | 'BUSINESS';
+  type: 'REAL_ESTATE' | 'STOCK' | 'BUSINESS' | 'FAST_TRACK_BIZ';
   quantity?: number; // For stocks
   symbol?: string; // For stocks
 }
@@ -77,6 +84,7 @@ export interface PlayerState {
   currentPosition: number;
   skippedTurns: number;
   hasCharity: boolean; // 2 dice
+  hasWon: boolean;
 }
 
 export interface GameCard {

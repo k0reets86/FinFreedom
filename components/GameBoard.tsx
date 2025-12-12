@@ -1,13 +1,14 @@
 
 import React from 'react';
-import { BoardSpace, PlayerState } from '../types';
-import { Wallet, TrendingUp, AlertTriangle, Briefcase, Heart, Baby, Scissors } from 'lucide-react';
+import { BoardSpace, PlayerState, SpaceType } from '../types';
+import { Wallet, TrendingUp, AlertTriangle, Briefcase, Heart, Baby, Scissors, Star, Building2 } from 'lucide-react';
 import { PLAYER_COLORS_TAILWIND } from '../constants';
 
 interface Props {
   spaces: BoardSpace[];
   players: PlayerState[];
   currentPlayerIndex: number;
+  viewingPlayerIndex: number;
   children?: React.ReactNode;
 }
 
@@ -20,11 +21,15 @@ const getIcon = (type: string) => {
     case 'CHARITY': return <Heart className="w-5 h-5 text-purple-100 opacity-90 drop-shadow-sm" />;
     case 'BABY': return <Baby className="w-5 h-5 text-pink-100 opacity-90 drop-shadow-sm" />;
     case 'DOWNSIZED': return <Scissors className="w-5 h-5 text-slate-300 opacity-90 drop-shadow-sm" />;
+    // Fast Track
+    case 'CASHFLOW_DAY': return <Wallet className="w-6 h-6 text-yellow-900 drop-shadow-sm" />;
+    case 'DREAM': return <Star className="w-6 h-6 text-pink-100 drop-shadow-sm" />;
+    case 'BUSINESS': return <Building2 className="w-6 h-6 text-emerald-100 drop-shadow-sm" />;
     default: return <div className="w-3 h-3 bg-white rounded-full" />;
   }
 };
 
-const GameBoard: React.FC<Props> = ({ spaces, players, currentPlayerIndex, children }) => {
+const GameBoard: React.FC<Props> = ({ spaces, players, currentPlayerIndex, viewingPlayerIndex, children }) => {
   // Mapping linear ID to 6x6 grid perimeter (20 spaces total)
   // Top: 0-5 (6 spaces)
   // Right: 6-9 (4 spaces)
@@ -38,16 +43,29 @@ const GameBoard: React.FC<Props> = ({ spaces, players, currentPlayerIndex, child
       return {};
   };
 
+  const isFastTrack = players[viewingPlayerIndex]?.isRatRace === false;
+
   return (
-    <div className="bg-slate-300 p-3 md:p-5 rounded-[2.5rem] shadow-[inset_0_2px_15px_rgba(0,0,0,0.1)] overflow-hidden select-none border-4 border-slate-100 relative">
+    <div className={`
+        transition-colors duration-700
+        ${isFastTrack ? 'bg-slate-900 border-yellow-500/50' : 'bg-slate-300 border-slate-100'}
+        p-3 md:p-5 rounded-[2.5rem] shadow-[inset_0_2px_15px_rgba(0,0,0,0.1)] overflow-hidden select-none border-4 relative
+    `}>
         {/* Board Texture/Gradient Background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300 opacity-50 pointer-events-none"></div>
+        <div className={`absolute inset-0 opacity-50 pointer-events-none transition-all duration-700 ${isFastTrack ? 'bg-gradient-to-br from-slate-900 to-slate-800' : 'bg-gradient-to-br from-slate-200 to-slate-300'}`}></div>
+        {isFastTrack && <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] pointer-events-none"></div>}
 
         <div className="grid grid-cols-6 grid-rows-6 gap-2 md:gap-3 aspect-square md:aspect-auto h-full min-h-[550px] relative z-10">
             
             {/* Render Spaces */}
             {spaces.map((space) => {
-                const playersOnSpace = players.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.currentPosition === space.id);
+                // Determine if this space should be rendered based on viewer context
+                // Note: The parent component passes the correct 'spaces' array based on viewingPlayer
+                
+                // Only show players on this space if they are in the same TRACK as the viewer
+                const playersOnSpace = players.map((p, i) => ({ ...p, originalIndex: i }))
+                                              .filter(p => p.currentPosition === space.id && p.isRatRace === players[viewingPlayerIndex].isRatRace);
+                
                 const isCurrentSpace = playersOnSpace.some(p => p.originalIndex === currentPlayerIndex);
 
                 return (
@@ -57,7 +75,7 @@ const GameBoard: React.FC<Props> = ({ spaces, players, currentPlayerIndex, child
                         className={`
                             relative rounded-2xl flex flex-col items-center justify-between p-1.5 py-2 text-center transition-all duration-500
                             ${space.color} 
-                            ${isCurrentSpace ? 'scale-[1.02] shadow-2xl ring-4 ring-white/50 z-30 brightness-105' : 'shadow-md shadow-black/5 opacity-90 hover:opacity-100 hover:scale-[1.02] z-10'}
+                            ${isCurrentSpace ? 'scale-[1.02] shadow-2xl ring-4 ring-white/50 z-30 brightness-110' : 'shadow-md shadow-black/20 opacity-90 hover:opacity-100 hover:scale-[1.02] z-10'}
                             bg-gradient-to-b from-white/10 to-black/5 border-t border-white/20 border-b-4 border-black/10
                         `}
                     >
@@ -93,8 +111,12 @@ const GameBoard: React.FC<Props> = ({ spaces, players, currentPlayerIndex, child
             })}
 
             {/* Center Area (The Hub) */}
-            <div className="col-start-2 col-end-6 row-start-2 row-end-6 bg-slate-50/80 backdrop-blur-sm rounded-3xl shadow-[inset_0_2px_10px_rgba(0,0,0,0.05)] border border-white/60 p-4 md:p-6 flex flex-col items-center justify-center relative overflow-hidden">
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 pointer-events-none"></div>
+            <div className={`col-start-2 col-end-6 row-start-2 row-end-6 backdrop-blur-sm rounded-3xl shadow-[inset_0_2px_10px_rgba(0,0,0,0.05)] border border-white/60 p-4 md:p-6 flex flex-col items-center justify-center relative overflow-hidden transition-colors duration-700 ${isFastTrack ? 'bg-slate-800/80' : 'bg-slate-50/80'}`}>
+                {isFastTrack ? (
+                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diamond-upholstery.png')] opacity-5 pointer-events-none"></div>
+                ) : (
+                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 pointer-events-none"></div>
+                )}
                 
                 {/* Provided Controls */}
                 <div className="z-10 w-full h-full flex flex-col justify-center">
